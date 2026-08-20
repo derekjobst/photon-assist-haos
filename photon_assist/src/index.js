@@ -30,7 +30,9 @@ async function main() {
   logger.info("started");
   for await (const [space, message] of app.messages) {
     const spaceType = message.platform === "imessage" ? imessage(space).type : undefined;
-    void relay.handle({ space, message, spaceType }).catch(() => logger.error("message_handling_failed"));
+    void relay.handle({ space, message, spaceType }).catch(() => {
+      logger.error(spaceType === "group" ? "group_message_handling_failed" : "message_handling_failed");
+    });
   }
 }
 

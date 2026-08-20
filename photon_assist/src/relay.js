@@ -39,46 +39,67 @@ export function createRelay({ config, store, assistant, reply, logger, queue = c
   }
 
   async function handle({ space, message, spaceType }) {
-    if (
-      message.platform !== "imessage" ||
-      message.direction !== "inbound" ||
-      message.content?.type !== "text" ||
-      !["dm", "group"].includes(spaceType) ||
-      !config.allowedSenders.has(message.sender?.id)
-    ) {
+    const logGroup = (event, level = "info") => {
+      if (spaceType === "group") logger[level](event);
+    };
+
+    logGroup("received_group_message");
+
+    if (message.platform !== "imessage" || !["dm", "group"].includes(spaceType)) {
+      return { handled: false };
+    }
+
+    if (message.direction !== "inbound") {
+      logGroup("ignored_group_non_inbound_message");
+      return { handled: false };
+    }
+
+    if (message.content?.type !== "text") {
+      logGroup("ignored_group_nontext_content");
+      return { handled: false };
+    }
+
+    if (!config.allowedSenders.has(message.sender?.id)) {
+      logGroup("ignored_group_unallowed_sender");
       return { handled: false };
     }
 
     const text = message.content.text.trim();
     if (text === "" || text.length > config.maxMessageChars) {
-      logger.warning("rejected_message_length");
+      logGroup("rejected_group_message_length", "warning");
+      if (spaceType !== "group") logger.warning("rejected_message_length");
       return { handled: false };
     }
 
     return queue.run(space.id, async () => {
       const claimed = await store.claimMessage(message.id, config.messageRetentionMs);
       if (!claimed) {
-        logger.info("ignored_duplicate_message");
+        logGroup("ignored_duplicate_group_message");
+        if (spaceType !== "group") logger.info("ignored_duplicate_message");
         return { handled: false, duplicate: true };
       }
 
       try {
         await message.read();
       } catch {
-        logger.warning("read_receipt_failed");
+        logGroup("group_read_receipt_failed", "warning");
+        if (spaceType !== "group") logger.warning("read_receipt_failed");
       }
 
       try {
         const replyText = await space.responding(() => processWithConversation(space.id, text));
         await reply(message, replyText);
-        logger.info("processed_message");
+        logGroup("processed_group_message");
+        if (spaceType !== "group") logger.info("processed_message");
         return { handled: true };
       } catch {
-        logger.error("assist_or_reply_failed");
+        logGroup("group_assist_or_reply_failed", "error");
+        if (spaceType !== "group") logger.error("assist_or_reply_failed");
         try {
           await reply(message, "I couldn't reach Assist. Please try again.");
         } catch {
-          logger.error("fallback_reply_failed");
+          logGroup("group_fallback_reply_failed", "error");
+          if (spaceType !== "group") logger.error("fallback_reply_failed");
         }
         return { handled: true, failed: true };
       }

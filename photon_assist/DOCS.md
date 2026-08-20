@@ -49,6 +49,10 @@ the Supervisor-provided `SUPERVISOR_TOKEN` at
   timeout, and server failures are never retried automatically.
 - Replies are sent as Markdown, which Spectrum renders as native styled text
   in remote iMessage mode.
+- Group processing emits privacy-safe diagnostic events at the default `info`
+  level, including `received_group_message`, a rejection category, and either
+  `processed_group_message` or a failure category. These events never include
+  message text, sender IDs, group IDs, or credentials.
 
 ## Troubleshooting
 

@@ -5,6 +5,7 @@ import { createRelay } from "../src/relay.js";
 
 function fixture() {
   const calls = [];
+  const events = [];
   const reads = [];
   const replies = [];
   const claimed = new Set();
@@ -29,7 +30,12 @@ function fixture() {
       return { replyText: "**Done**", conversationId: "conversation-2" };
     },
   };
-  const logger = { debug() {}, info() {}, warning() {}, error() {} };
+  const logger = {
+    debug: (event) => events.push(`debug:${event}`),
+    info: (event) => events.push(`info:${event}`),
+    warning: (event) => events.push(`warning:${event}`),
+    error: (event) => events.push(`error:${event}`),
+  };
   const relay = createRelay({
     config,
     store,
@@ -46,7 +52,7 @@ function fixture() {
     content: { type: "text", text: "turn on lights" },
     read: async () => reads.push(message.id),
   };
-  return { relay, calls, reads, replies, space, message };
+  return { relay, calls, events, reads, replies, space, message };
 }
 
 test("relays an allowed DM and stores the returned conversation", async () => {
@@ -58,7 +64,7 @@ test("relays an allowed DM and stores the returned conversation", async () => {
   assert.deepEqual(replies, ["**Done**"]);
 });
 
-test("relays an allowed human-created group message", async () => {
+test("logs delivery and processing stages for an allowed human-created group message", async () => {
   const group = fixture();
   assert.deepEqual(await group.relay.handle({ space: group.space, message: group.message, spaceType: "group" }), {
     handled: true,
@@ -66,6 +72,27 @@ test("relays an allowed human-created group message", async () => {
   assert.equal(group.calls.length, 1);
   assert.deepEqual(group.reads, ["message-1"]);
   assert.deepEqual(group.replies, ["**Done**"]);
+  assert.deepEqual(group.events, ["info:received_group_message", "info:processed_group_message"]);
+});
+
+test("logs a safe rejection reason for an unallowed group sender", async () => {
+  const group = fixture();
+  group.message.sender.id = "+15557654321";
+
+  assert.deepEqual(await group.relay.handle({ space: group.space, message: group.message, spaceType: "group" }), {
+    handled: false,
+  });
+  assert.deepEqual(group.events, ["info:received_group_message", "info:ignored_group_unallowed_sender"]);
+});
+
+test("logs a safe rejection reason for non-text group content", async () => {
+  const group = fixture();
+  group.message.content = { type: "addMember", members: ["+15557654321"] };
+
+  assert.deepEqual(await group.relay.handle({ space: group.space, message: group.message, spaceType: "group" }), {
+    handled: false,
+  });
+  assert.deepEqual(group.events, ["info:received_group_message", "info:ignored_group_nontext_content"]);
 });
 
 test("rejects unsupported conversations and unknown senders without calling Assist", async () => {

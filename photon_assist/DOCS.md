@@ -1,7 +1,8 @@
 # Photon Assist
 
-This app routes allowed inbound iMessage direct messages from Photon Spectrum
-Cloud to a Home Assistant conversation agent and replies in the same thread.
+This app routes allowed inbound iMessage direct and human-created group messages
+from Photon Spectrum Cloud to a Home Assistant conversation agent and replies
+in the same thread.
 
 ## Requirements
 
@@ -10,8 +11,10 @@ Cloud to a Home Assistant conversation agent and replies in the same thread.
 - The Home Assistant conversation agent configured in `agent_id`. The default
   is `conversation.claude`.
 
-Spectrum's free/shared-line mode is supported for direct messages only. This
-app intentionally rejects all group conversations.
+The app supports existing group conversations, but it does not create or manage
+groups. Photon requires a dedicated line for those operations. A reply in a
+group is visible to every participant, so only use groups whose members may see
+Home Assistant's responses.
 
 ## Configuration
 
@@ -19,7 +22,7 @@ app intentionally rejects all group conversations.
 | --- | --- |
 | `spectrum_project_id` | Required Photon Spectrum project ID. |
 | `spectrum_project_secret` | Required Photon Spectrum project secret. It is masked in the app UI. |
-| `allowed_senders` | Required list of allowed E.164 telephone numbers. |
+| `allowed_senders` | Required list of allowed E.164 telephone numbers. In a group, this authorizes the sender of a message; it does not verify every group participant. |
 | `language` | Language sent to the Conversation API, normally `en`. |
 | `agent_id` | Conversation agent entity ID, default `conversation.claude`. |
 | `conversation_ttl_minutes` | Per-DM Assist context retention; default 24 hours. |
@@ -33,11 +36,14 @@ the Supervisor-provided `SUPERVISOR_TOKEN` at
 
 ## Behavior and recovery
 
-- Inbound messages are serialized per iMessage DM so conversation IDs cannot
+- Inbound messages are serialized per iMessage conversation so conversation IDs cannot
   race.
 - A persisted message ID is claimed before Assist is called. This favors safe
   non-duplication of home-control requests if the app crashes at an unlucky
   time.
+- Once an allowed message has been claimed, the app marks it read, then
+  shows a typing indicator while Assist runs. A read-receipt failure never
+  blocks Assist.
 - A stored conversation ID is cleared and retried once only when Home Assistant
   clearly reports that the supplied conversation ID is invalid. Network,
   timeout, and server failures are never retried automatically.
@@ -53,4 +59,3 @@ the Supervisor-provided `SUPERVISOR_TOKEN` at
   `allowed_senders`.
 - If Assist is unavailable, the app sends a generic retry message and logs the
   failure category without private content.
-

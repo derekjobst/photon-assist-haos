@@ -43,7 +43,7 @@ export function createRelay({ config, store, assistant, reply, logger, queue = c
       message.platform !== "imessage" ||
       message.direction !== "inbound" ||
       message.content?.type !== "text" ||
-      spaceType !== "dm" ||
+      !["dm", "group"].includes(spaceType) ||
       !config.allowedSenders.has(message.sender?.id)
     ) {
       return { handled: false };
@@ -60,6 +60,12 @@ export function createRelay({ config, store, assistant, reply, logger, queue = c
       if (!claimed) {
         logger.info("ignored_duplicate_message");
         return { handled: false, duplicate: true };
+      }
+
+      try {
+        await message.read();
+      } catch {
+        logger.warning("read_receipt_failed");
       }
 
       try {
@@ -81,4 +87,3 @@ export function createRelay({ config, store, assistant, reply, logger, queue = c
 
   return { handle };
 }
-

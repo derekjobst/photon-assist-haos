@@ -5,6 +5,7 @@ import { createRelay } from "../src/relay.js";
 
 function fixture() {
   const calls = [];
+  const reads = [];
   const replies = [];
   const claimed = new Set();
   const conversations = new Map();
@@ -43,24 +44,37 @@ function fixture() {
     direction: "inbound",
     sender: { id: "+15551234567" },
     content: { type: "text", text: "turn on lights" },
+    read: async () => reads.push(message.id),
   };
-  return { relay, calls, replies, space, message };
+  return { relay, calls, reads, replies, space, message };
 }
 
 test("relays an allowed DM and stores the returned conversation", async () => {
-  const { relay, calls, replies, space, message } = fixture();
+  const { relay, calls, reads, replies, space, message } = fixture();
   assert.deepEqual(await relay.handle({ space, message, spaceType: "dm" }), { handled: true });
+  assert.deepEqual(reads, ["message-1"]);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].agentId, "conversation.claude");
   assert.deepEqual(replies, ["**Done**"]);
 });
 
-test("rejects groups and unknown senders without calling Assist", async () => {
+test("relays an allowed human-created group message", async () => {
   const group = fixture();
   assert.deepEqual(await group.relay.handle({ space: group.space, message: group.message, spaceType: "group" }), {
+    handled: true,
+  });
+  assert.equal(group.calls.length, 1);
+  assert.deepEqual(group.reads, ["message-1"]);
+  assert.deepEqual(group.replies, ["**Done**"]);
+});
+
+test("rejects unsupported conversations and unknown senders without calling Assist", async () => {
+  const unsupported = fixture();
+  assert.deepEqual(await unsupported.relay.handle({ space: unsupported.space, message: unsupported.message, spaceType: "other" }), {
     handled: false,
   });
-  assert.equal(group.calls.length, 0);
+  assert.equal(unsupported.calls.length, 0);
+  assert.deepEqual(unsupported.reads, []);
 
   const unknown = fixture();
   unknown.message.sender.id = "+15557654321";
@@ -68,14 +82,52 @@ test("rejects groups and unknown senders without calling Assist", async () => {
     handled: false,
   });
   assert.equal(unknown.calls.length, 0);
+  assert.deepEqual(unknown.reads, []);
 });
 
 test("does not execute a duplicate message twice", async () => {
-  const { relay, calls, space, message } = fixture();
+  const { relay, calls, reads, space, message } = fixture();
   await relay.handle({ space, message, spaceType: "dm" });
   const duplicate = await relay.handle({ space, message, spaceType: "dm" });
   assert.deepEqual(duplicate, { handled: false, duplicate: true });
   assert.equal(calls.length, 1);
+  assert.deepEqual(reads, ["message-1"]);
+});
+
+test("continues to Assist when marking a message read fails", async () => {
+  const { relay, calls, space, message } = fixture();
+  const warnings = [];
+  message.read = async () => {
+    throw new Error("read receipt unavailable");
+  };
+  const warningRelay = createRelay({
+    config: {
+      allowedSenders: new Set(["+15551234567"]),
+      maxMessageChars: 4000,
+      messageRetentionMs: 1000,
+      conversationTtlMs: 1000,
+      language: "en",
+      agentId: "conversation.claude",
+    },
+    store: {
+      claimMessage: async () => true,
+      getConversation: async () => undefined,
+      setConversation: async () => {},
+      clearConversation: async () => {},
+    },
+    assistant: {
+      process: async (input) => {
+        calls.push(input);
+        return { replyText: "Done", conversationId: "conversation-2" };
+      },
+    },
+    logger: { debug() {}, info() {}, warning: (event) => warnings.push(event), error() {} },
+    reply: async () => {},
+  });
+
+  assert.deepEqual(await warningRelay.handle({ space, message, spaceType: "dm" }), { handled: true });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(warnings, ["read_receipt_failed"]);
 });
 
 test("retries once without a stored conversation only when it is invalid", async () => {

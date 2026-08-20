@@ -3,7 +3,7 @@ version: "0.1.2"
 slug: "photon_assist"
 description: "Relay allowed Photon iMessage DMs to Home Assistant Assist"
 url: "https://github.com/derekjobst/photon-assist-haos"
-image: "ghcr.io/derekjobst/photon-assist"
+image: "ghcr.io/derekjobst/photon-assist-haos"
 arch:
   - amd64
   - aarch64

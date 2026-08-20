@@ -1,0 +1,26 @@
+configuration:
+  spectrum_project_id:
+    name: Spectrum project ID
+    description: Project ID from the Photon Spectrum dashboard.
+  spectrum_project_secret:
+    name: Spectrum project secret
+    description: Secret from the Photon Spectrum dashboard.
+  allowed_senders:
+    name: Allowed senders
+    description: E.164 phone numbers allowed to control Assist. Group chats are not supported.
+  language:
+    name: Language
+    description: Language tag sent to Home Assistant's Conversation API.
+  agent_id:
+    name: Conversation agent ID
+    description: Home Assistant conversation agent to use.
+  conversation_ttl_minutes:
+    name: Conversation TTL (minutes)
+    description: How long to retain a DM's Assist conversation context.
+  message_retention_days:
+    name: Message deduplication retention (days)
+    description: How long to retain inbound message IDs to prevent duplicate processing.
+  max_message_chars:
+    name: Maximum message length
+    description: Maximum number of characters accepted in one inbound iMessage.
+

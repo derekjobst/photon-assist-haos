@@ -1,0 +1,86 @@
+name: Release and publish
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: photon-assist-release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: photon_assist/package-lock.json
+      - name: Test release candidate
+        working-directory: photon_assist
+        run: |
+          npm ci
+          npm run check
+          npm test
+      - name: Create next patch release
+        id: version
+        shell: bash
+        run: |
+          latest_tag="$(git tag --list 'v[0-9]*' --sort=-version:refname | head -n 1)"
+          if [[ -z "${latest_tag}" ]]; then
+            configured_version="$(awk -F'"' '/^version:/{print $2; exit}' photon_assist/config.yaml)"
+            latest_tag="v${configured_version}"
+          fi
+          if [[ ! "${latest_tag}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Expected an existing vMAJOR.MINOR.PATCH tag, found: ${latest_tag:-none}" >&2
+            exit 1
+          fi
+          next_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+          export NEXT_VERSION="${next_version}"
+
+          sed -i -E "0,/^version: \"[^\"]+\"/s//version: \"${next_version}\"/" photon_assist/config.yaml
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from "node:fs/promises";
+          const packagePath = "photon_assist/package.json";
+          const packageJson = JSON.parse(await readFile(packagePath, "utf8"));
+          packageJson.version = process.env.NEXT_VERSION;
+          await writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+
+          const lockPath = "photon_assist/package-lock.json";
+          const lockfile = JSON.parse(await readFile(lockPath, "utf8"));
+          lockfile.version = process.env.NEXT_VERSION;
+          lockfile.packages[""].version = process.env.NEXT_VERSION;
+          await writeFile(lockPath, `${JSON.stringify(lockfile, null, 2)}\n`);
+          NODE
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add photon_assist/config.yaml photon_assist/package.json photon_assist/package-lock.json
+          git commit -m "chore(release): v${next_version} [skip ci]"
+          git tag --annotate "v${next_version}" --message "v${next_version}"
+          git push origin HEAD:main --follow-tags
+          echo "value=${next_version}" >> "${GITHUB_OUTPUT}"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: photon_assist
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: BUILD_VERSION=${{ steps.version.outputs.value }}
+          tags: ghcr.io/${{ github.repository }}:${{ steps.version.outputs.value }}

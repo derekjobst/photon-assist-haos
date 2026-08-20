@@ -1,0 +1,31 @@
+name: "Photon Assist"
+version: "0.1.0"
+slug: "photon_assist"
+description: "Relay allowed Photon iMessage DMs to Home Assistant Assist"
+url: "https://github.com/derekjobst/photon-assist-haos"
+image: "ghcr.io/derekjobst/photon-assist-haos"
+arch:
+  - amd64
+  - aarch64
+startup: application
+init: false
+homeassistant_api: true
+options:
+  log_level: info
+  allowed_senders: []
+  language: en
+  agent_id: conversation.claude
+  conversation_ttl_minutes: 1440
+  message_retention_days: 7
+  max_message_chars: 4000
+schema:
+  log_level: "list(debug|info|warning|error)"
+  spectrum_project_id: str
+  spectrum_project_secret: password
+  allowed_senders:
+    - "match(^\\+[1-9][0-9]{1,14}$)"
+  language: str
+  agent_id: str
+  conversation_ttl_minutes: "int(1,10080)"
+  message_retention_days: "int(1,30)"
+  max_message_chars: "int(1,10000)"

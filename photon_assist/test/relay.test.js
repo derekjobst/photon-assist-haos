@@ -1,0 +1,123 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { HomeAssistantError } from "../src/home-assistant.js";
+import { createRelay } from "../src/relay.js";
+
+function fixture() {
+  const calls = [];
+  const replies = [];
+  const claimed = new Set();
+  const conversations = new Map();
+  const config = {
+    allowedSenders: new Set(["+15551234567"]),
+    maxMessageChars: 4000,
+    messageRetentionMs: 1000,
+    conversationTtlMs: 1000,
+    language: "en",
+    agentId: "conversation.claude",
+  };
+  const store = {
+    claimMessage: async (id) => !claimed.has(id) && (claimed.add(id), true),
+    getConversation: async (id) => conversations.get(id),
+    setConversation: async (id, value) => conversations.set(id, value),
+    clearConversation: async (id) => conversations.delete(id),
+  };
+  const assistant = {
+    process: async (input) => {
+      calls.push(input);
+      return { replyText: "**Done**", conversationId: "conversation-2" };
+    },
+  };
+  const logger = { debug() {}, info() {}, warning() {}, error() {} };
+  const relay = createRelay({
+    config,
+    store,
+    assistant,
+    logger,
+    reply: async (_message, text) => replies.push(text),
+  });
+  const space = { id: "dm-1", responding: async (action) => action() };
+  const message = {
+    id: "message-1",
+    platform: "imessage",
+    direction: "inbound",
+    sender: { id: "+15551234567" },
+    content: { type: "text", text: "turn on lights" },
+  };
+  return { relay, calls, replies, space, message };
+}
+
+test("relays an allowed DM and stores the returned conversation", async () => {
+  const { relay, calls, replies, space, message } = fixture();
+  assert.deepEqual(await relay.handle({ space, message, spaceType: "dm" }), { handled: true });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].agentId, "conversation.claude");
+  assert.deepEqual(replies, ["**Done**"]);
+});
+
+test("rejects groups and unknown senders without calling Assist", async () => {
+  const group = fixture();
+  assert.deepEqual(await group.relay.handle({ space: group.space, message: group.message, spaceType: "group" }), {
+    handled: false,
+  });
+  assert.equal(group.calls.length, 0);
+
+  const unknown = fixture();
+  unknown.message.sender.id = "+15557654321";
+  assert.deepEqual(await unknown.relay.handle({ space: unknown.space, message: unknown.message, spaceType: "dm" }), {
+    handled: false,
+  });
+  assert.equal(unknown.calls.length, 0);
+});
+
+test("does not execute a duplicate message twice", async () => {
+  const { relay, calls, space, message } = fixture();
+  await relay.handle({ space, message, spaceType: "dm" });
+  const duplicate = await relay.handle({ space, message, spaceType: "dm" });
+  assert.deepEqual(duplicate, { handled: false, duplicate: true });
+  assert.equal(calls.length, 1);
+});
+
+test("retries once without a stored conversation only when it is invalid", async () => {
+  const { relay, calls, space, message } = fixture();
+  let attempt = 0;
+  const store = {
+    claimMessage: async () => true,
+    getConversation: async () => "stale-conversation",
+    setConversation: async () => {},
+    clearConversation: async () => {},
+  };
+  const assistant = {
+    process: async (input) => {
+      attempt += 1;
+      calls.push(input);
+      if (attempt === 1) {
+        throw new HomeAssistantError({
+          kind: "http",
+          status: 400,
+          body: { message: "Unknown conversation_id" },
+        });
+      }
+      return { replyText: "Done", conversationId: "new-conversation" };
+    },
+  };
+  const retryRelay = createRelay({
+    config: {
+      allowedSenders: new Set(["+15551234567"]),
+      maxMessageChars: 4000,
+      messageRetentionMs: 1000,
+      conversationTtlMs: 1000,
+      language: "en",
+      agentId: "conversation.claude",
+    },
+    store,
+    assistant,
+    logger: { debug() {}, info() {}, warning() {}, error() {} },
+    reply: async () => {},
+  });
+
+  await retryRelay.handle({ space, message, spaceType: "dm" });
+  assert.equal(attempt, 2);
+  assert.equal(calls[0].conversationId, "stale-conversation");
+  assert.equal(calls[1].conversationId, undefined);
+});

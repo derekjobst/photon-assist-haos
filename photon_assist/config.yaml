@@ -1,5 +1,5 @@
 name: "Photon Assist"
-version: "0.1.4"
+version: "0.1.5"
 slug: "photon_assist"
 description: "Relay allowed Photon iMessage DMs to Home Assistant Assist"
 url: "https://github.com/derekjobst/photon-assist-haos"
